@@ -1,0 +1,61 @@
+from flask import Flask, request, jsonify
+import pytesseract
+from PIL import Image
+import os
+import tempfile
+import imghdr
+import base64
+
+# Configure the path to Tesseract executable if needed
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+app = Flask(__name__)
+
+def save_temp_image(image_data, image_extension):
+    # Save the image to a temporary file with the correct extension
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.' + image_extension) as temp_image:
+        temp_image.write(image_data)
+        temp_image_path = temp_image.name
+    return temp_image_path
+
+@app.route('/extract_text', methods=['POST'])
+def extract_text():
+    if 'image' in request.files:
+        # Handle file upload from gallery
+        image_file = request.files['image']
+
+        # Check file extension and set the temporary file suffix accordingly
+        image_extension = imghdr.what(None, h=image_file.read())
+        if not image_extension:
+            return jsonify({'error': 'Unsupported image format'}), 400
+
+        image_file.seek(0)
+        temp_image_path = save_temp_image(image_file.read(), image_extension)
+
+    elif 'image_base64' in request.form:
+        # Handle base64 encoded image from camera
+        try:
+            image_data = base64.b64decode(request.form['image_base64'])
+            image_extension = imghdr.what(None, h=image_data)
+            if not image_extension:
+                return jsonify({'error': 'Unsupported image format'}), 400
+
+            temp_image_path = save_temp_image(image_data, image_extension)
+        except Exception as e:
+            return jsonify({'error': f'Error decoding base64 image: {str(e)}'}), 400
+
+    else:
+        return jsonify({'error': 'No image provided'}), 400
+
+    try:
+        # Use pytesseract to extract text with multiple languages
+        extracted_text = pytesseract.image_to_string(Image.open(temp_image_path), lang='eng+hin+tam+tel+kan')
+    except Exception as e:
+        return jsonify({'error': f'Error processing image it is of low clarity  : {str(e)}'}), 500
+    finally:
+        os.remove(temp_image_path)  # Clean up the temporary image file
+
+    return jsonify({'text': extracted_text.strip()}), 200
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000, host='0.0.0.0')
